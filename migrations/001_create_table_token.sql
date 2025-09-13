@@ -1,0 +1,8 @@
+-- Creating token table
+CREATE TABLE IF NOT EXISTS tokens (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		refresh_token TEXT NOT NULL,
+		access_token TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
