@@ -33,7 +33,10 @@ func SetupRoutes(appInstance *app.App) *gin.Engine {
 	v1 := router.Group("/api/v1")
 	{
 		v1.GET("/refresh-token", h.RefreshToken)
+		v1.GET("/get-currently-playing-track", h.GetCurrentlyPlayingTrack)
+		v1.GET("/get-recently-played-tracks", h.GetRecentlyPlayedTracks)
 		v1.GET("/get-token", h.GetToken)
+		v1.POST("/set-token", h.SetToken)
 	}
 
 	return router

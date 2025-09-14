@@ -34,6 +34,11 @@ type RefreshResponse struct {
 	Scope        string `json:"scope"`
 }
 
+type SetTokenRequest struct {
+	AccessToken  string `json:"access_token" binding:"required"`
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
 func (app *App) GetHello(c *gin.Context) {
 	response := Response{
 		Message: "Hello world",
@@ -42,14 +47,106 @@ func (app *App) GetHello(c *gin.Context) {
 }
 
 func (app *App) GetToken(c *gin.Context) {
-	var accessToken string
+	accessToken := ""
 	query := `SELECT access_token FROM tokens WHERE id = 1`
 	err := app.DB.Get(&accessToken, query)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No access token found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"access_token": accessToken})
+	c.JSON(http.StatusOK, accessToken)
+}
+
+func (app *App) GetCurrentlyPlayingTrack(c *gin.Context) {
+	accessToken := ""
+	query := `SELECT access_token FROM tokens WHERE id = 1`
+	err := app.DB.Get(&accessToken, query)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No access token found"})
+		return
+	}
+	track_url := "https://api.spotify.com/v1/me/player/currently-playing"
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", track_url, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	res, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to make request"})
+		return
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode == http.StatusNoContent {
+		c.JSON(http.StatusOK, gin.H{"message": "No track currently playing"})
+		return
+	}
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response"})
+		return
+	}
+
+	// Parse the JSON to ensure it's valid before returning
+	var trackData json.RawMessage
+	err = json.Unmarshal(body, &trackData)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid JSON response from Spotify"})
+		return
+	}
+
+	c.JSON(http.StatusOK, trackData)
+}
+
+func (app *App) GetRecentlyPlayedTracks(c *gin.Context) {
+	accessToken := ""
+	query := `SELECT access_token FROM tokens WHERE id = 1`
+	err := app.DB.Get(&accessToken, query)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No access token found"})
+		return
+	}
+	track_url := "https://api.spotify.com/v1/me/player/recently-played"
+
+	client := &http.Client{}
+	req, err := http.NewRequest("GET", track_url, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create request"})
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	res, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to make request"})
+		return
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode == http.StatusNoContent {
+		c.JSON(http.StatusOK, gin.H{"message": "No recently played tracks"})
+		return
+	}
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response"})
+		return
+	}
+
+	// Parse the JSON to ensure it's valid before returning
+	var trackData json.RawMessage
+	err = json.Unmarshal(body, &trackData)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Invalid JSON response from Spotify"})
+		return
+	}
+
+	c.JSON(http.StatusOK, trackData)
 }
 
 func (app *App) RefreshToken(c *gin.Context) {
@@ -109,5 +206,52 @@ func (app *App) RefreshToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Token refreshed successfully",
+	})
+}
+
+// Admin API to set token through API
+func (app *App) SetToken(c *gin.Context) {
+	var req SetTokenRequest
+
+	// Bind JSON payload to struct
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload: " + err.Error()})
+		return
+	}
+
+	// Check if a token record exists
+	var count int
+	countQuery := `SELECT COUNT(*) FROM tokens WHERE id = 1`
+	err := app.DB.Get(&count, countQuery)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check existing tokens: " + err.Error()})
+		return
+	}
+
+	var query string
+	var result interface{}
+
+	if count > 0 {
+		// Update existing token
+		query = `UPDATE tokens SET access_token = ?, refresh_token = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1`
+		result, err = app.DB.Exec(query, req.AccessToken, req.RefreshToken)
+	} else {
+		// Insert new token
+		query = `INSERT INTO tokens (id, access_token, refresh_token) VALUES (1, ?, ?)`
+		result, err = app.DB.Exec(query, req.AccessToken, req.RefreshToken)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save tokens: " + err.Error()})
+		return
+	}
+
+	log.Printf("Tokens set successfully. Result: %+v", result)
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "Tokens set successfully",
+		"access_token":  req.AccessToken[:10] + "...",  // Only show first 10 chars for security
+		"refresh_token": req.RefreshToken[:10] + "...", // Only show first 10 chars for security
+	})
 }
