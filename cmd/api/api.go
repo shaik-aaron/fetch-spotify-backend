@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/shaik-aaron/fetch-spotify-backend/internal/app"
@@ -11,6 +12,11 @@ import (
 )
 
 func main() {
+	// Create data directory if it doesn't exist
+	if err := os.MkdirAll("./data", 0755); err != nil {
+		log.Fatal("Failed to create data directory:", err)
+	}
+
 	dbPath := "./data/tokens.db"
 	db, err := sqlx.Connect("sqlite", dbPath+"?_busy_timeout=10000&_journal_mode=WAL&_foreign_keys=on")
 	if err != nil {
@@ -31,8 +37,14 @@ func main() {
 
 	router := routes.SetupRoutes(appInstance)
 
-	log.Println("🚀 Starting server on localhost:8080...")
-	if err := router.Run("localhost:8080"); err != nil {
+	// Use PORT environment variable for Railway
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("🚀 Starting server on port %s...", port)
+	if err := router.Run(":" + port); err != nil {
 		log.Fatal("Failed to start server:", err)
 	}
 }

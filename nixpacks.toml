@@ -1,0 +1,8 @@
+[phases.setup]
+nixPkgs = ["sqlite"]
+
+[phases.build]
+cmds = ["go build -o main cmd/api/api.go"]
+
+[start]
+cmd = "./main"
