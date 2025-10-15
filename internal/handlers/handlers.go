@@ -175,7 +175,7 @@ func (app *App) RefreshToken(c *gin.Context) {
 	}
 	defer post.Body.Close()
 
-	// Log the HTTP status code
+	// Log the HTTP status code from response
 	log.Println("HTTP Status Code:", post.StatusCode)
 
 	// Read the response body
