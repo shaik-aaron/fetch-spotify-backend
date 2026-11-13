@@ -157,16 +157,16 @@ func (app *App) RefreshToken(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No refresh token found"})
 		return
 	}
+	if refreshToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Stored refresh token is empty"})
+		return
+	}
 	tokenURL := "https://accounts.spotify.com/api/token"
 
-	// Prepare form data as URL-encoded string
-	log.Println("refreshToken", refreshToken)
 	data := url.Values{}
 	data.Set("grant_type", "refresh_token")
 	data.Set("refresh_token", refreshToken)
 	data.Set("client_id", "b03179410679401796263b9d74a630cd")
-
-	log.Println("data", data.Encode())
 
 	post, err := http.Post(tokenURL, "application/x-www-form-urlencoded", strings.NewReader(data.Encode()))
 	if err != nil {
@@ -175,20 +175,21 @@ func (app *App) RefreshToken(c *gin.Context) {
 	}
 	defer post.Body.Close()
 
-	// Log the HTTP status code from response
-	log.Println("HTTP Status Code:", post.StatusCode)
+	log.Println("Spotify token refresh status:", post.StatusCode)
 
-	// Read the response body
 	bodyBytes, err := io.ReadAll(post.Body)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read response body"})
 		return
 	}
 
-	// Log the raw response
-	log.Println("Raw Response Body:", string(bodyBytes))
+	// Spotify error bodies have no tokens. A non-200 must not be written to the database:
+	// unmarshalling an error into RefreshResponse yields empty strings and would erase both tokens.
+	if post.StatusCode != http.StatusOK {
+		c.Data(post.StatusCode, "application/json", bodyBytes)
+		return
+	}
 
-	// Parse the JSON response
 	var response RefreshResponse
 	err = json.Unmarshal(bodyBytes, &response)
 	if err != nil {
@@ -197,11 +198,24 @@ func (app *App) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	// Log the parsed response
-	log.Printf("Parsed Response: AccessToken=%s, RefreshToken=%s, ExpiresIn=%d",
-		response.AccessToken, response.RefreshToken, response.ExpiresIn)
+	if response.AccessToken == "" {
+		log.Println("Spotify token refresh returned 200 without an access token")
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Spotify did not return an access token"})
+		return
+	}
+
+	// Spotify only includes refresh_token when it rotates that token.
+	// An omitted field means the refresh token we just sent is still valid.
+	newRefreshToken := response.RefreshToken
+	if newRefreshToken == "" {
+		newRefreshToken = refreshToken
+		log.Printf("Spotify omitted refresh_token; keeping the stored refresh token. ExpiresIn=%d", response.ExpiresIn)
+	} else {
+		log.Printf("Spotify rotated the refresh token. ExpiresIn=%d", response.ExpiresIn)
+	}
+
 	query = `UPDATE tokens SET access_token = ?, refresh_token = ? WHERE id = 1`
-	_, err = app.DB.Exec(query, response.AccessToken, response.RefreshToken)
+	_, err = app.DB.Exec(query, response.AccessToken, newRefreshToken)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
